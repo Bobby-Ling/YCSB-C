@@ -6,6 +6,11 @@
 
 #include "rocksdb_db.h"
 #include "lib/coding.h"
+#include <aws/core/Aws.h>
+#include <aws/s3/S3Client.h>
+#include <aws/core/auth/AWSCredentialsProviderChain.h>
+#include "rocksdb/cloud/db_cloud.h"
+#include "rocksdb/options.h"
 
 using namespace std;
 
@@ -14,47 +19,79 @@ namespace ycsbc {
     
         //set option
         rocksdb::Options options;
-        SetOptions(&options, props);
-        
-
-        rocksdb::Status s = rocksdb::DB::Open(options,dbfilename,&db_);
+        SetOptions(&options, props, dbfilename);
+        std::string persistent_cache = "";
+        rocksdb::Status s = rocksdb::DBCloud::Open(options,dbfilename,persistent_cache,0,&db_);
         if(!s.ok()){
             cerr<<"Can't open rocksdb "<<dbfilename<<" "<<s.ToString()<<endl;
             exit(0);
         }
     }
 
-    void RocksDB::SetOptions(rocksdb::Options *options, utils::Properties &props) {
+    void RocksDB::SetOptions(rocksdb::Options *options, utils::Properties &props, const char *dbfilename) {
 
         //// 默认的Rocksdb配置
         options->create_if_missing = true;
         options->compression = rocksdb::kNoCompression;
         options->enable_pipelined_write = true;
 
+        options->write_buffer_size = 64 * 1024 * 1024;
+        options->target_file_size_base = 64 * 1024 * 1024;
+        options->max_background_compactions = 8;
+        options->use_direct_reads=true;
+        options->use_direct_io_for_flush_and_compaction=true;
+
         ////
 
-        int dboption = stoi(props["dboption"]);
+        //int dboption = stoi(props["dboption"]);
 
-        if ( dboption == 1) {  //RocksDB-L0-NVM: L0 have file path 
-#ifdef ROCKSDB_L0_NVM 
-            printf("set Rocksdb_L0_NVM options!\n");
-            options->level0_file_num_compaction_trigger = 4;
-            options->level0_slowdown_writes_trigger = 112;     
-            options->level0_stop_writes_trigger = 128;
-            options->level0_file_path = "/pmem/nvm";
-#endif
+        // if ( dboption == 1) {  //use cloud db
+        std::string kDBPath = dbfilename;
+        std::string kBucketSuffix = "generalbuckets-jx";
+        std::string kRegion = "ap-northeast-1";
+        // cloud environment config options here
+        rocksdb::CloudFileSystemOptions cloud_fs_options;
+        // // Store a reference to a cloud file system. A new cloud env object should be
+        // associated with every new cloud-db.
+        std::shared_ptr<rocksdb::FileSystem> cloud_fs;
+        // std::cout << getenv("AWS_ACCESS_KEY_ID") << std::endl;
+        // std::cout << getenv("AWS_SECRET_ACCESS_KEY") << std::endl;
+        cloud_fs_options.credentials.InitializeSimple(
+            getenv("AWS_ACCESS_KEY_ID"), getenv("AWS_SECRET_ACCESS_KEY"));
+        if (!cloud_fs_options.credentials.HasValid().ok()) {
+            fprintf(
+                stderr,
+                "Please set env variables "
+                "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY with cloud credentials");
+            return ;
         }
-        else if ( dboption == 2 ) { //Matrixkv: 
-#ifdef MATRIXKV 
-            printf("set Matrixkv options!\n");
-            rocksdb::NvmSetup* nvm_setup = new rocksdb::NvmSetup();
-            nvm_setup->use_nvm_module = true;
-            nvm_setup->pmem_path = "/pmem/nvm";
-            options->nvm_setup.reset(nvm_setup);
-            options->max_background_jobs = 3;
-            options->max_bytes_for_level_base = 8ul * 1024 * 1024 * 1024;
-#endif 
+        // create a bucket name for debugging purposes
+        const std::string bucketName = kBucketSuffix;
+        // Create a new AWS cloud env Status
+        rocksdb::CloudFileSystem* cfs;
+        Aws::SDKOptions sdkoptions;
+        Aws::InitAPI(sdkoptions);
+        rocksdb::Status s;
+        s = rocksdb::CloudFileSystemEnv::NewAwsFileSystem(
+            rocksdb::FileSystem::Default(), kBucketSuffix, kDBPath, kRegion, kBucketSuffix,
+            kDBPath, kRegion, cloud_fs_options, nullptr, &cfs);
+        if (!s.ok()) {
+            fprintf(stderr, "Unable to create cloud env in bucket %s. %s\n",
+                    bucketName.c_str(), s.ToString().c_str());
+            return ;
         }
+        cloud_fs.reset(cfs);
+        // Create options and use the AWS file system that we created earlier
+        auto cloud_env = NewCompositeEnv(cloud_fs);
+        options->env = cloud_env.release();
+        options->hyper_level = 0;
+        options->upload_while_generate = true;
+        options->cloud_move=true;
+        options->db_paths = {{kDBPath + "/ebs", 1024l * 1024 * 1024 * 1024},{kDBPath + "/s3", 1024l * 1024 * 1024 * 1024}};
+        // }
+        // else if ( dboption == 2 ) { //
+
+        // }
         
     }
 
@@ -140,7 +177,8 @@ namespace ycsbc {
     }
 
     bool RocksDB::HaveBalancedDistribution() {
-        return db_->HaveBalancedDistribution();
+        //return db_->HaveBalancedDistribution();
+        return true;
     }
 
     RocksDB::~RocksDB() {

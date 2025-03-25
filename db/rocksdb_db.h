@@ -9,7 +9,7 @@
 #include <iostream>
 #include <string>
 #include "core/properties.h"
-#include <rocksdb/db.h>
+#include <rocksdb/cloud/db_cloud.h>
 
 using std::cout;
 using std::endl;
@@ -43,10 +43,10 @@ namespace ycsbc {
         ~RocksDB();
 
     private:
-        rocksdb::DB *db_;
+        rocksdb::DBCloud *db_;
         unsigned noResult;
 
-        void SetOptions(rocksdb::Options *options, utils::Properties &props);
+        void SetOptions(rocksdb::Options *options, utils::Properties &props, const char *dbfilename);
         void SerializeValues(std::vector<KVPair> &kvs, std::string &value);
         void DeSerializeValues(std::string &value, std::vector<KVPair> &kvs);
 
