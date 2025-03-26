@@ -9,7 +9,7 @@ AWS_INCLUDE=/usr/local/include/
 CC=g++
 CFLAGS=-std=c++20 -g -Wall -pthread -I./ -I$(ROCKSDB_INCLUDE) -I$(AWS_INCLUDE) -L$(ROCKSDB_LIB) -DUSE_AWS
 #LDFLAGS= -lpthread -lrocksdb -lz -lbz2 -llz4 -ldl -lsnappy -lpmem -lnuma -lzstd
-LDFLAGS= -lpthread -lz -lbz2 -llz4 -ldl -lsnappy -L$(HDR_LIB) -lzstd ${ROCKSDB_LIBRARY} -laws-cpp-sdk-s3 -laws-cpp-sdk-core -laws-cpp-sdk-transfer -laws-cpp-sdk-kinesis 
+LDFLAGS= -lpthread -lz -lbz2 -llz4 -ldl -lsnappy -L$(HDR_LIB) -lhdr_histogram -lzstd ${ROCKSDB_LIBRARY} -laws-cpp-sdk-s3 -laws-cpp-sdk-core -laws-cpp-sdk-transfer -laws-cpp-sdk-kinesis 
 SUBDIRS= core db 
 SUBSRCS=$(wildcard core/*.cc) $(wildcard db/*.cc)
 OBJECTS=$(SUBSRCS:.cc=.o)

@@ -11,19 +11,64 @@
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include "rocksdb/cloud/db_cloud.h"
 #include "rocksdb/options.h"
+#include <hdr/hdr_histogram.h>
 
 using namespace std;
 
 namespace ycsbc {
+
+    void RocksDB::latency_hiccup(uint64_t iops) {
+        //fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
+        fprintf(f_hdr_hiccup_output_, "%-11.2lf %-8ld %-8ld %-8ld %-8ld\n",
+              hdr_mean(hdr_last_1s_),
+              hdr_value_at_percentile(hdr_last_1s_, 95),
+              hdr_value_at_percentile(hdr_last_1s_, 99),
+              hdr_value_at_percentile(hdr_last_1s_, 99.99),
+			  iops);
+        hdr_reset(hdr_last_1s_);
+        fflush(f_hdr_hiccup_output_);
+    }
+
     RocksDB::RocksDB(const char *dbfilename, utils::Properties &props) :noResult(0){
-    
+        int r = hdr_init(1,INT64_C(3600000000),3,&hdr_);
+        r |= hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_);
+        r |= hdr_init(1, INT64_C(3600000000), 3, &hdr_get_);
+        r |= hdr_init(1, INT64_C(3600000000), 3, &hdr_put_);
+        r |= hdr_init(1, INT64_C(3600000000), 3, &hdr_update_);
+        r |= hdr_init(1, INT64_C(3600000000), 3, &hdr_scan_);
+	    r |= hdr_init(1, INT64_C(3600000000), 3, &hdr_rmw_);
+        if((0 != r) || (NULL == hdr_) || (NULL == hdr_last_1s_) 
+		    || (NULL == hdr_get_) || (NULL == hdr_put_)
+		    || (NULL == hdr_scan_) || (NULL == hdr_rmw_) 
+		    || (NULL == hdr_update_) || (23552 < hdr_->counts_len)) {
+                cout << "DEBUG- init hdrhistogram failed." << endl;
+                cout << "DEBUG- r=" << r << endl;
+                cout << "DEBUG- histogram=" << &hdr_ << endl;
+                cout << "DEBUG- counts_len=" << hdr_->counts_len << endl;
+                cout << "DEBUG- counts:" << hdr_->counts << ", total_c:" << hdr_->total_count << endl;
+                cout << "DEBUG- lowest:" << hdr_->lowest_discernible_value << ", max:" <<hdr_->highest_trackable_value << endl;
+                free(hdr_);
+                exit(0);
+        }
+        f_hdr_output_= std::fopen("/nvmedata/rocksdb-lat.hgrm", "w+");
+    	if(!f_hdr_output_) {
+      	    std::perror("hdr output file opening failed");
+      	    exit(0);
+   	    }
+	
+        f_hdr_hiccup_output_ = std::fopen("/nvmedata/rocksdb-lat.hiccup", "w+");	
+        if(!f_hdr_hiccup_output_) {
+                std::perror("hdr hiccup output file opening failed");
+                exit(0);
+        }   
+    	fprintf(f_hdr_hiccup_output_, "#mean       95th    99th    99.99th    IOPS\n");
         //set option
         rocksdb::Options options;
         SetOptions(&options, props, dbfilename);
         std::string persistent_cache = "";
         rocksdb::Status s = rocksdb::DBCloud::Open(options,dbfilename,persistent_cache,0,&db_);
         if(!s.ok()){
-            cerr<<"Can't open rocksdb "<<dbfilename<<" "<<s.ToString()<<endl;
+            cout<<"Can't open rocksdb "<<dbfilename<<" "<<s.ToString()<<endl;
             exit(0);
         }
     }
@@ -43,51 +88,51 @@ namespace ycsbc {
 
         ////
 
-        //int dboption = stoi(props["dboption"]);
+        // int dboption = stoi(props["dboption"]);
 
         // if ( dboption == 1) {  //use cloud db
-        std::string kDBPath = dbfilename;
-        std::string kBucketSuffix = "generalbuckets-jx";
-        std::string kRegion = "ap-northeast-1";
-        // cloud environment config options here
-        rocksdb::CloudFileSystemOptions cloud_fs_options;
-        // // Store a reference to a cloud file system. A new cloud env object should be
-        // associated with every new cloud-db.
-        std::shared_ptr<rocksdb::FileSystem> cloud_fs;
-        // std::cout << getenv("AWS_ACCESS_KEY_ID") << std::endl;
-        // std::cout << getenv("AWS_SECRET_ACCESS_KEY") << std::endl;
-        cloud_fs_options.credentials.InitializeSimple(
-            getenv("AWS_ACCESS_KEY_ID"), getenv("AWS_SECRET_ACCESS_KEY"));
-        if (!cloud_fs_options.credentials.HasValid().ok()) {
-            fprintf(
-                stderr,
-                "Please set env variables "
-                "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY with cloud credentials");
-            return ;
-        }
-        // create a bucket name for debugging purposes
-        const std::string bucketName = kBucketSuffix;
-        // Create a new AWS cloud env Status
-        rocksdb::CloudFileSystem* cfs;
-        Aws::SDKOptions sdkoptions;
-        Aws::InitAPI(sdkoptions);
-        rocksdb::Status s;
-        s = rocksdb::CloudFileSystemEnv::NewAwsFileSystem(
-            rocksdb::FileSystem::Default(), kBucketSuffix, kDBPath, kRegion, kBucketSuffix,
-            kDBPath, kRegion, cloud_fs_options, nullptr, &cfs);
-        if (!s.ok()) {
-            fprintf(stderr, "Unable to create cloud env in bucket %s. %s\n",
-                    bucketName.c_str(), s.ToString().c_str());
-            return ;
-        }
-        cloud_fs.reset(cfs);
-        // Create options and use the AWS file system that we created earlier
-        auto cloud_env = NewCompositeEnv(cloud_fs);
-        options->env = cloud_env.release();
-        options->hyper_level = 0;
-        options->upload_while_generate = true;
-        options->cloud_move=true;
-        options->db_paths = {{kDBPath + "/ebs", 1024l * 1024 * 1024 * 1024},{kDBPath + "/s3", 1024l * 1024 * 1024 * 1024}};
+            std::string kDBPath = dbfilename;
+            std::string kBucketSuffix = "generalbuckets-jx";
+            std::string kRegion = "ap-northeast-1";
+            // cloud environment config options here
+            rocksdb::CloudFileSystemOptions cloud_fs_options;
+            // // Store a reference to a cloud file system. A new cloud env object should be
+            // associated with every new cloud-db.
+            std::shared_ptr<rocksdb::FileSystem> cloud_fs;
+            // std::cout << getenv("AWS_ACCESS_KEY_ID") << std::endl;
+            // std::cout << getenv("AWS_SECRET_ACCESS_KEY") << std::endl;
+            cloud_fs_options.credentials.InitializeSimple(
+                getenv("AWS_ACCESS_KEY_ID"), getenv("AWS_SECRET_ACCESS_KEY"));
+            if (!cloud_fs_options.credentials.HasValid().ok()) {
+                fprintf(
+                    stderr,
+                    "Please set env variables "
+                    "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY with cloud credentials");
+                return ;
+            }
+            // create a bucket name for debugging purposes
+            const std::string bucketName = kBucketSuffix;
+            // Create a new AWS cloud env Status
+            rocksdb::CloudFileSystem* cfs;
+            Aws::SDKOptions sdkoptions;
+            Aws::InitAPI(sdkoptions);
+            rocksdb::Status s;
+            s = rocksdb::CloudFileSystemEnv::NewAwsFileSystem(
+                rocksdb::FileSystem::Default(), kBucketSuffix, kDBPath, kRegion, kBucketSuffix,
+                kDBPath, kRegion, cloud_fs_options, nullptr, &cfs);
+            if (!s.ok()) {
+                fprintf(stderr, "Unable to create cloud env in bucket %s. %s\n",
+                        bucketName.c_str(), s.ToString().c_str());
+                return ;
+            }
+            cloud_fs.reset(cfs);
+            // Create options and use the AWS file system that we created earlier
+            auto cloud_env = NewCompositeEnv(cloud_fs);
+            options->env = cloud_env.release();
+            options->hyper_level = 0;
+            options->upload_while_generate = true;
+            options->cloud_move=true;
+            options->db_paths = {{kDBPath + "/ebs", 1024l * 1024 * 1024 * 1024},{kDBPath + "/s3", 1024l * 1024 * 1024 * 1024}};
         // }
         // else if ( dboption == 2 ) { //
 
@@ -101,17 +146,11 @@ namespace ycsbc {
         string value;
         rocksdb::Status s = db_->Get(rocksdb::ReadOptions(),key,&value);
         if(s.ok()) {
-            //printf("value:%lu\n",value.size());
             DeSerializeValues(value, result);
-            /* printf("get:key:%lu-%s\n",key.size(),key.data());
-            for( auto kv : result) {
-                printf("get field:key:%lu-%s value:%lu-%s\n",kv.first.size(),kv.first.data(),kv.second.size(),kv.second.data());
-            } */
             return DB::kOK;
         }
         if(s.IsNotFound()){
             noResult++;
-            //cerr<<"read not found:"<<noResult<<endl;
             return DB::kOK;
         }else{
             cerr<<"read error"<<endl;
@@ -126,11 +165,9 @@ namespace ycsbc {
         it->Seek(key);
         std::string val;
         std::string k;
-        //printf("len:%d\n",len);
         for(int i=0;i < len && it->Valid(); i++){
             k = it->key().ToString();
             val = it->value().ToString();
-            //printf("i:%d key:%lu value:%lu\n",i,k.size(),val.size());
             it->Next();
         } 
         delete it;
@@ -142,10 +179,6 @@ namespace ycsbc {
         rocksdb::Status s;
         string value;
         SerializeValues(values,value);
-        /* printf("put:key:%lu-%s\n",key.size(),key.data());
-        for( auto kv : values) {
-            printf("put field:key:%lu-%s value:%lu-%s\n",kv.first.size(),kv.first.data(),kv.second.size(),kv.second.data());
-        } */
         s = db_->Put(rocksdb::WriteOptions(), key, value);
         if(!s.ok()){
             cerr<<"insert error\n"<<endl;
@@ -174,6 +207,46 @@ namespace ycsbc {
         string stats;
         db_->GetProperty("rocksdb.stats",&stats);
         cout<<stats<<endl;
+ 
+	cout << "-----------------------------------------------------" << endl;
+	cout << "SUMMARY latency (us) of this run with HDR measurement" << endl;
+	cout << "         ALL      GET      PUT      UPD      SCAN    RMW" << endl;
+	fprintf(stdout, "mean     %-8.3lf %-8.3lf %-8.3lf %-8.3lf %8.3lf %8.3lf\n",
+		hdr_mean(hdr_),
+		hdr_mean(hdr_get_),
+		hdr_mean(hdr_put_),
+		hdr_mean(hdr_update_),
+		hdr_mean(hdr_scan_),
+		hdr_mean(hdr_rmw_));
+		
+	fprintf(stdout, "95th     %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld\n",
+		hdr_value_at_percentile(hdr_, 95),
+    		hdr_value_at_percentile(hdr_get_, 95),
+		hdr_value_at_percentile(hdr_put_, 95),
+		hdr_value_at_percentile(hdr_update_, 95),
+		hdr_value_at_percentile(hdr_scan_, 95),
+		hdr_value_at_percentile(hdr_rmw_, 95));
+        fprintf(stdout, "99th     %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld\n",
+                hdr_value_at_percentile(hdr_, 99),
+                hdr_value_at_percentile(hdr_get_, 99),
+                hdr_value_at_percentile(hdr_put_, 99),
+                hdr_value_at_percentile(hdr_update_, 99),
+		hdr_value_at_percentile(hdr_scan_, 99),
+		hdr_value_at_percentile(hdr_rmw_, 99));
+        fprintf(stdout, "99.99th  %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld\n",
+                hdr_value_at_percentile(hdr_, 99.99),
+                hdr_value_at_percentile(hdr_get_, 99.99),
+                hdr_value_at_percentile(hdr_put_, 99.99),
+                hdr_value_at_percentile(hdr_update_, 99.99),
+                hdr_value_at_percentile(hdr_scan_, 99.99),
+                hdr_value_at_percentile(hdr_rmw_, 99.99));
+
+	
+	int ret = hdr_percentiles_print(hdr_,f_hdr_output_,5,1.0,CLASSIC);
+	if( 0 != ret ){
+	    cout << "hdr percentile output print file error!" <<endl;
+	}
+	cout << "-------------------------------" << endl;
     }
 
     bool RocksDB::HaveBalancedDistribution() {
@@ -183,8 +256,38 @@ namespace ycsbc {
 
     RocksDB::~RocksDB() {
         printf("wait delete db\n");
+        free(hdr_);
+        free(hdr_last_1s_);
+        free(hdr_get_);
+        free(hdr_put_);
+        free(hdr_update_);
+        free(hdr_scan_);
+        free(hdr_rmw_);
         delete db_;
         printf("delete\n");
+    }
+
+    void RocksDB::RecordTime(int op,uint64_t tx_xtime){
+    	if(tx_xtime > 3600000000) {
+	    cout << "too large tx_xtime" << endl;
+	}
+
+	hdr_record_value(hdr_, tx_xtime);
+	hdr_record_value(hdr_last_1s_, tx_xtime);
+
+	if(op == 1){
+		hdr_record_value(hdr_put_, tx_xtime);
+	} else if(op == 2) {
+		hdr_record_value(hdr_get_, tx_xtime);
+	} else if(op == 3) {
+		hdr_record_value(hdr_update_, tx_xtime);
+	} else if(op == 4) {
+		hdr_record_value(hdr_scan_, tx_xtime);
+	} else if(op == 5) {
+		hdr_record_value(hdr_rmw_, tx_xtime);
+	} else {
+		cout << "record time err with op error" << endl;
+	}
     }
 
     void RocksDB::SerializeValues(std::vector<KVPair> &kvs, std::string &value) {
