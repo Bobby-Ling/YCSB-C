@@ -14,7 +14,6 @@
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include "rocksdb/cloud/db_cloud.h"
 #include "rocksdb/options.h"
-#include <hdr/hdr_histogram.h>
 
 using namespace std;
 
