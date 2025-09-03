@@ -49,43 +49,42 @@ inline bool Client::DoInsert() {
 
 inline bool Client::DoTransaction() {
   int status = -1;
-  uint64_t start_time = get_now_micros();
-  uint64_t op_time;
+  // uint64_t op_time;
   switch (workload_.NextOperation()) {
     case READ:
       status = TransactionRead();
-      op_time = (get_now_micros() - start_time );
-      ops_time[READ] += op_time;
+      // op_time = (get_now_micros() - start_time );
+      // ops_time[READ] += op_time;
       ops_cnt[READ]++;
-      db_.RecordTime(2,op_time);
+      // db_.RecordTime(2,op_time);
       break;
     case UPDATE:
       status = TransactionUpdate();
-      op_time = (get_now_micros() - start_time );
-      ops_time[UPDATE] += op_time;
+      // op_time = (get_now_micros() - start_time );
+      // ops_time[UPDATE] += op_time;
       ops_cnt[UPDATE]++;
-      db_.RecordTime(3,op_time);
+      // db_.RecordTime(3,op_time);
       break;
     case INSERT:
       status = TransactionInsert();
-      op_time = (get_now_micros() - start_time );
-      ops_time[INSERT] += op_time;
+      // op_time = (get_now_micros() - start_time );
+      // ops_time[INSERT] += op_time;
       ops_cnt[INSERT]++;
-      db_.RecordTime(1,op_time);
+      // db_.RecordTime(1,op_time);
       break;
     case SCAN:
       status = TransactionScan();
-      op_time = (get_now_micros() - start_time );
-      ops_time[SCAN] += op_time;
+      // op_time = (get_now_micros() - start_time );
+      // ops_time[SCAN] += op_time;
       ops_cnt[SCAN]++;
-      db_.RecordTime(4,op_time);
+      // db_.RecordTime(4,op_time);
       break;
     case READMODIFYWRITE:
       status = TransactionReadModifyWrite();
-      op_time = (get_now_micros() - start_time );
-      ops_time[READMODIFYWRITE] += op_time;
+      // op_time = (get_now_micros() - start_time );
+      // ops_time[READMODIFYWRITE] += op_time;
       ops_cnt[READMODIFYWRITE]++;
-      db_.RecordTime(5,op_time);
+      // db_.RecordTime(5,op_time);
       break;
     default:
       throw utils::Exception("Operation request is not recognized!");
