@@ -14,6 +14,7 @@
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include "rocksdb/cloud/db_cloud.h"
 #include "rocksdb/options.h"
+#include "rocksdb/filter_policy.h"
 
 using namespace std;
 
@@ -80,6 +81,7 @@ namespace ycsbc {
 
          //// 设置 512MB block cache
         rocksdb::BlockBasedTableOptions table_options;
+        table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
         table_options.block_cache = rocksdb::NewLRUCache(512L * 1024 * 1024);
         options->table_factory.reset(NewBlockBasedTableFactory(table_options));
         ////
