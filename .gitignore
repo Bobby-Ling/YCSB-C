@@ -37,7 +37,6 @@
 *.data
 *.output
 
-.vscode
 redis/sample
 ycsbc
 
