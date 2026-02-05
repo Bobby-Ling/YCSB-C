@@ -9,6 +9,7 @@
 #ifndef YCSB_C_CLIENT_H_
 #define YCSB_C_CLIENT_H_
 
+#include "core/timer.h"
 #include <string>
 #include "db.h"
 #include "core_workload.h"
@@ -22,20 +23,20 @@ namespace ycsbc {
 class Client {
  public:
   Client(DB &db, CoreWorkload &wl) : db_(db), workload_(wl) { }
-  
+
   virtual bool DoInsert();
   virtual bool DoTransaction();
-  
+
   virtual ~Client() { }
-  
+
  protected:
-  
+
   virtual int TransactionRead();
   virtual int TransactionReadModifyWrite();
   virtual int TransactionScan();
   virtual int TransactionUpdate();
   virtual int TransactionInsert();
-  
+
   DB &db_;
   CoreWorkload &workload_;
 };
@@ -151,7 +152,7 @@ inline int Client::TransactionInsert() {
   std::vector<DB::KVPair> values;
   workload_.BuildValues(values);
   return db_.Insert(table, key, values);
-} 
+}
 
 } // ycsbc
 
