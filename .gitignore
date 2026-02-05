@@ -42,3 +42,6 @@ redis/sample
 ycsbc
 
 NVM_LOG
+
+build/
+.cache/
